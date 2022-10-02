@@ -3251,25 +3251,29 @@ If NO-WAIT is non-nil send the request as notification."
             (and
              lsp-response-timeout
              (+ send-time lsp-response-timeout)))
-           resp-result resp-error done?)
+           resp-result resp-error done? catching?)
       (unwind-protect
           (progn
             (lsp-request-async method params
-                               (lambda (res) (setf resp-result (or res :finished)) (throw 'lsp-done '_))
-                               :error-handler (lambda (err) (setf resp-error err) (throw 'lsp-done '_))
+                               (lambda (res) (setf resp-result (or res :finished)) (and catching? (throw 'lsp-done '_)))
+                               :error-handler (lambda (err) (setf resp-error err) (and catching? (throw 'lsp-done '_)))
                                :no-merge no-merge
                                :mode 'detached
                                :cancel-token :sync-request)
             (while (not (or resp-error resp-result))
               (if (functionp 'json-rpc-connection)
-                  (catch 'lsp-done (sit-for 0.01))
+                  (catch 'lsp-done
+                    (setq catching? t)
+                    (sit-for 0.01))
                 (catch 'lsp-done
+                  (setq catching? t)
                   (accept-process-output
                    nil
                    (if expected-time (- expected-time send-time) 1))))
               (setq send-time (float-time))
               (when (and expected-time (< expected-time send-time))
                 (error "Timeout while waiting for response.  Method: %s" method)))
+            (setq catching? nil)
             (setq done? t)
             (cond
              ((eq resp-result :finished) nil)
@@ -3290,21 +3294,23 @@ Return same value as `lsp--while-no-input' and respecting `non-essential'."
               (and
                lsp-response-timeout
                (+ send-time lsp-response-timeout)))
-             resp-result resp-error done?)
+             resp-result resp-error done? catching?)
         (unwind-protect
             (progn
               (lsp-request-async method params
-                                 (lambda (res) (setf resp-result (or res :finished)) (throw 'lsp-done '_))
-                                 :error-handler (lambda (err) (setf resp-error err) (throw 'lsp-done '_))
+                                 (lambda (res) (setf resp-result (or res :finished)) (and catching? (throw 'lsp-done '_)))
+                                 :error-handler (lambda (err) (setf resp-error err) (and catching? (throw 'lsp-done '_)))
                                  :mode 'detached
                                  :cancel-token :sync-request)
               (while (not (or resp-error resp-result (input-pending-p)))
                 (catch 'lsp-done
+                  (setq catching? t)
                   (sit-for
                    (if expected-time (- expected-time send-time) 1)))
                 (setq send-time (float-time))
                 (when (and expected-time (< expected-time send-time))
                   (error "Timeout while waiting for response.  Method: %s" method)))
+              (setq catching? nil)
               (setq done? (or resp-error resp-result))
               (cond
                ((eq resp-result :finished) nil)
